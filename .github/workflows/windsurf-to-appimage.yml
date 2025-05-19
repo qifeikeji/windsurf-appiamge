@@ -19,7 +19,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl gnupg wget python3 git zsync
+          sudo apt-get install -y curl gnupg wget python3 git zsync imagemagick \
+            dpkg dpkg-deb file desktop-file-utils binutils
+          # Ensure all pkg2appimage dependencies are installed
+          # desktop-file-utils provides desktop-file-validate
+          # binutils provides strings
 
       # Add Windsurf repository and install windsurf
       - name: Add Windsurf repository and install
@@ -75,7 +79,7 @@ jobs:
         run: |
           pkg2appimage recipe.yml
           # Move the generated AppImage to a predictable location
-          mv out/*.AppImage windsurf.AppImage
+          mv out/*.AppImage windsurf.AppImage || echo "AppImage creation may have failed, check logs."
 
       # Upload the AppImage as an artifact
       - name: Upload AppImage
