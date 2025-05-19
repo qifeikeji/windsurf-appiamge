@@ -26,12 +26,13 @@ jobs:
       # Update APT sources and debug
       - name: Update APT sources
         run: |
-          sudo apt-get update
+          sudo apt-get update || { echo "Failed to update APT sources!"; exit 1; }
           # Verify that windsurf repository is included
           cat /etc/apt/sources.list.d/windsurf.list
           apt-cache policy | grep windsurf || echo "Windsurf repository not found in apt-cache policy!"
           # Check if windsurf package is available
           apt-cache search windsurf || echo "Windsurf package not found!"
+          apt-cache show windsurf || echo "No details available for windsurf package!"
 
       # Install dependencies
       - name: Install dependencies
@@ -44,9 +45,11 @@ jobs:
       # Install windsurf and debug
       - name: Install windsurf
         run: |
-          sudo apt-get install -y windsurf || { echo "Failed to install windsurf!"; exit 1; }
+          sudo apt-get install -y windsurf || { echo "Failed to install windsurf! Check if the package exists in the repository."; exit 1; }
           # Check APT cache for windsurf .deb
           ls -l /var/cache/apt/archives/windsurf*.deb || echo "No windsurf .deb found in cache!"
+          # List all .deb files in cache for debugging
+          ls -l /var/cache/apt/archives/ || echo "APT cache is empty!"
 
       # Locate and inspect the windsurf .deb package
       - name: Locate and inspect windsurf .deb package
@@ -61,9 +64,14 @@ jobs:
           # Copy the .deb to workspace
           mkdir -p windsurf-deb
           cp "$DEB_PATH" windsurf-deb/windsurf.deb
+          # Verify the .deb file exists in windsurf-deb
+          ls -l windsurf-deb/windsurf.deb || { echo "Failed to copy windsurf.deb!"; exit 1; }
           # Inspect .deb contents
           dpkg -c windsurf-deb/windsurf.deb > deb_contents.txt
           cat deb_contents.txt
+          # Find executable files in .deb
+          echo "Looking for executable files in .deb:"
+          grep -E '^[-rwx].*windsurf' deb_contents.txt || echo "No executable windsurf files found in .deb!"
           echo "DEB_PATH=windsurf-deb/windsurf.deb" >> $GITHUB_ENV
 
       # Install pkg2appimage
@@ -76,6 +84,16 @@ jobs:
       # Create a recipe file for pkg2appimage
       - name: Create pkg2appimage recipe
         run: |
+          # Dynamically find the windsurf binary path from .deb contents
+          BINARY_PATH=$(grep -E '^[-rwx].*windsurf' deb_contents.txt | awk '{print $6}' | grep -E 'windsurf$' | head -n 1)
+          if [ -z "$BINARY_PATH" ]; then
+            echo "No windsurf binary found in .deb, using fallback path!"
+            BINARY_PATH="usr/bin/windsurf"
+          fi
+          # Remove leading './' from BINARY_PATH if present
+          BINARY_PATH=${BINARY_PATH#./}
+          echo "Using binary path: $BINARY_PATH"
+          # Generate recipe.yml
           cat <<EOF > recipe.yml
           # pkg2appimage recipe for windsurf
           app: windsurf
@@ -90,23 +108,38 @@ jobs:
           script:
             - echo "Listing files in current directory:"
             - ls -l
-            - echo "Checking for binary in common locations:"
-            - find usr/ opt/ -type f -executable -name "*windsurf*" || echo "No windsurf binary found!"
-            - mv usr/bin/windsurf . || mv opt/windsurf/windsurf . || mv usr/local/bin/windsurf . || echo "No windsurf binary found in expected locations!"
+            - echo "Extracted .deb contents:"
+            - find . -type f
+            - echo "Moving binary from $BINARY_PATH"
+            - mv $BINARY_PATH . || echo "Failed to move binary from $BINARY_PATH!"
             - chmod +x windsurf || echo "Failed to make windsurf executable!"
           EOF
+          cat recipe.yml
 
       # Convert .deb to AppImage
       - name: Convert windsurf to AppImage
         run: |
+          ls -l windsurf-deb/windsurf.deb || echo "windsurf.deb not found in windsurf-deb!"
           pkg2appimage recipe.yml || echo "pkg2appimage failed, check logs for details."
           # Move the generated AppImage to a predictable location
           mv out/*.AppImage windsurf.AppImage || echo "No AppImage generated, check previous steps."
+          # List generated files for debugging
+          ls -l out/ || echo "No files in out/ directory!"
 
       # Upload the AppImage as an artifact
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: windsur-appimage
+          name: windsurf-appimage
           path: windsurf.AppImage
+          if-no-files-found: warn
+
+      # Upload debug artifacts
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: |
+            deb_contents.txt
+            recipe.yml
           if-no-files-found: warn
