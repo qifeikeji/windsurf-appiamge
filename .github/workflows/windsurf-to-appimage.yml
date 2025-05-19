@@ -1,4 +1,4 @@
-name: Build Windsurf AppImage
+name: Convert Windsurf DEB to ZIP
 
 on:
   push:
@@ -37,8 +37,7 @@ jobs:
       # Install dependencies
       - name: Install dependencies
         run: |
-          sudo apt-get install -y wget python3 git zsync imagemagick \
-            dpkg file desktop-file-utils binutils
+          sudo apt-get install -y zip dpkg
           # Verify dpkg-deb is available
           which dpkg-deb || { echo "dpkg-deb not found!"; exit 1; }
 
@@ -51,8 +50,8 @@ jobs:
           # List all .deb files in cache for debugging
           ls -l /var/cache/apt/archives/ || echo "APT cache is empty!"
 
-      # Locate and inspect the windsurf .deb package
-      - name: Locate and inspect windsurf .deb package
+      # Locate and extract the windsurf .deb package
+      - name: Locate and extract windsurf .deb package
         run: |
           # Find the cached .deb package in APT cache
           DEB_PATH=$(find /var/cache/apt/archives -name "windsurf*.deb" | head -n 1)
@@ -64,75 +63,39 @@ jobs:
           # Copy the .deb to workspace
           mkdir -p windsurf-deb
           cp "$DEB_PATH" windsurf-deb/windsurf.deb
-          # Verify the .deb file exists in windsurf-deb
+          # Verify the .deb file exists
           ls -l windsurf-deb/windsurf.deb || { echo "Failed to copy windsurf.deb!"; exit 1; }
           # Inspect .deb contents
           dpkg -c windsurf-deb/windsurf.deb > deb_contents.txt
           cat deb_contents.txt
-          # Find executable files in .deb
-          echo "Looking for executable files in .deb:"
-          grep -E '^[-rwx].*windsurf' deb_contents.txt || echo "No executable windsurf files found in .deb!"
-          echo "DEB_PATH=windsurf-deb/windsurf.deb" >> $GITHUB_ENV
+          # Extract .deb contents
+          mkdir -p windsurf-extracted
+          dpkg-deb -x windsurf-deb/windsurf.deb windsurf-extracted
+          # List extracted files
+          echo "Extracted .deb contents:"
+          find windsurf-extracted -type f > extracted_files.txt
+          cat extracted_files.txt
 
-      # Install pkg2appimage
-      - name: Install pkg2appimage
+      # Convert extracted files to ZIP
+      - name: Convert to ZIP
         run: |
-          git clone https://github.com/AppImage/pkg2appimage.git
-          chmod +x pkg2appimage/pkg2appimage
-          sudo mv pkg2appimage/pkg2appimage /usr/local/bin/
+          # Create a ZIP file from extracted .deb contents
+          cd windsurf-extracted
+          zip -r ../windsurf.zip . || { echo "Failed to create windsurf.zip!"; exit 1; }
+          cd ..
+          # Verify the ZIP file
+          ls -l windsurf.zip || { echo "windsurf.zip not found!"; exit 1; }
+          # List contents of ZIP for debugging
+          unzip -l windsurf.zip > zip_contents.txt
+          cat zip_contents.txt
 
-      # Create a recipe file for pkg2appimage
-      - name: Create pkg2appimage recipe
-        run: |
-          # Dynamically find the windsurf binary path from .deb contents
-          BINARY_PATH=$(grep -E '^[-rwx].*windsurf' deb_contents.txt | awk '{print $6}' | grep -E 'windsurf$' | head -n 1)
-          if [ -z "$BINARY_PATH" ]; then
-            echo "No windsurf binary found in .deb, using fallback path!"
-            BINARY_PATH="usr/bin/windsurf"
-          fi
-          # Remove leading './' from BINARY_PATH if present
-          BINARY_PATH=${BINARY_PATH#./}
-          echo "Using binary path: $BINARY_PATH"
-          # Generate recipe.yml
-          cat <<EOF > recipe.yml
-          # pkg2appimage recipe for windsurf
-          app: windsurf
-          
-          ingredients:
-            dist: noble
-            sources:
-              - deb file://\${GITHUB_WORKSPACE}/windsurf-deb /
-            packages:
-              - windsurf
-          
-          script:
-            - echo "Listing files in current directory:"
-            - ls -l
-            - echo "Extracted .deb contents:"
-            - find . -type f
-            - echo "Moving binary from $BINARY_PATH"
-            - mv $BINARY_PATH . || echo "Failed to move binary from $BINARY_PATH!"
-            - chmod +x windsurf || echo "Failed to make windsurf executable!"
-          EOF
-          cat recipe.yml
-
-      # Convert .deb to AppImage
-      - name: Convert windsurf to AppImage
-        run: |
-          ls -l windsurf-deb/windsurf.deb || echo "windsurf.deb not found in windsurf-deb!"
-          pkg2appimage recipe.yml || echo "pkg2appimage failed, check logs for details."
-          # Move the generated AppImage to a predictable location
-          mv out/*.AppImage windsurf.AppImage || echo "No AppImage generated, check previous steps."
-          # List generated files for debugging
-          ls -l out/ || echo "No files in out/ directory!"
-
-      # Upload the AppImage as an artifact
-      - name: Upload AppImage
+      # Upload the ZIP as an artifact
+      - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: windsurf-appimage
-          path: windsurf.AppImage
-          if-no-files-found: warn
+          name: windsurf-zip
+          path: windsurf.zip
+          if-no-files-found: error
 
       # Upload debug artifacts
       - name: Upload debug artifacts
@@ -141,5 +104,6 @@ jobs:
           name: debug-artifacts
           path: |
             deb_contents.txt
-            recipe.yml
+            extracted_files.txt
+            zip_contents.txt
           if-no-files-found: warn
