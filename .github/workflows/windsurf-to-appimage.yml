@@ -15,22 +15,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Set up dependencies
-      - name: Install dependencies
+      # Add Windsurf repository
+      - name: Add Windsurf repository
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl gnupg wget python3 git zsync imagemagick \
-            dpkg dpkg-deb file desktop-file-utils binutils
-          # Ensure all pkg2appimage dependencies are installed
-          # desktop-file-utils provides desktop-file-validate
-          # binutils provides strings
-
-      # Add Windsurf repository and install windsurf
-      - name: Add Windsurf repository and install
-        run: |
+          sudo apt-get install -y curl gnupg
           curl -fsSL "https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/windsurf.gpg" | sudo gpg --dearmor -o /usr/share/keyrings/windsurf-stable-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/windsurf-stable-archive-keyring.gpg arch=amd64] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main" | sudo tee /etc/apt/sources.list.d/windsurf.list > /dev/null
+
+      # Update APT sources
+      - name: Update APT sources
+        run: |
           sudo apt-get update
+          # Verify that windsurf repository is included
+          cat /etc/apt/sources.list.d/windsurf.list
+          apt-cache policy | grep windsurf
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y wget python3 git zsync imagemagick \
+            dpkg file desktop-file-utils binutils
+          # Verify dpkg-deb is available
+          which dpkg-deb || { echo "dpkg-deb not found!"; exit 1; }
+
+      # Install windsurf
+      - name: Install windsurf
+        run: |
           sudo apt-get install -y windsurf
 
       # Locate the windsurf .deb package
@@ -63,7 +74,7 @@ jobs:
           app: windsurf
           
           ingredients:
-            dist: focal
+            dist: noble
             sources:
               - deb file://\${GITHUB_WORKSPACE}/windsurf-deb /
             packages:
