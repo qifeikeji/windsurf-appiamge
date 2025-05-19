@@ -1,0 +1,85 @@
+name: Build Windsurf AppImage
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Set up dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg wget python3 git zsync
+
+      # Add Windsurf repository and install windsurf
+      - name: Add Windsurf repository and install
+        run: |
+          curl -fsSL "https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/windsurf.gpg" | sudo gpg --dearmor -o /usr/share/keyrings/windsurf-stable-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/windsurf-stable-archive-keyring.gpg arch=amd64] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main" | sudo tee /etc/apt/sources.list.d/windsurf.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y windsurf
+
+      # Locate the windsurf .deb package
+      - name: Locate windsurf .deb package
+        run: |
+          # Find the cached .deb package in APT cache
+          DEB_PATH=$(find /var/cache/apt/archives -name "windsurf*.deb" | head -n 1)
+          if [ -z "$DEB_PATH" ]; then
+            echo "No windsurf .deb package found in cache!"
+            exit 1
+          fi
+          echo "Found .deb package at: $DEB_PATH"
+          # Copy the .deb to workspace
+          mkdir -p windsurf-deb
+          cp "$DEB_PATH" windsurf-deb/windsurf.deb
+          echo "DEB_PATH=windsurf-deb/windsurf.deb" >> $GITHUB_ENV
+
+      # Install pkg2appimage
+      - name: Install pkg2appimage
+        run: |
+          git clone https://github.com/AppImage/pkg2appimage.git
+          chmod +x pkg2appimage/pkg2appimage
+          sudo mv pkg2appimage/pkg2appimage /usr/local/bin/
+
+      # Create a recipe file for pkg2appimage
+      - name: Create pkg2appimage recipe
+        run: |
+          cat <<EOF > recipe.yml
+          # pkg2appimage recipe for windsurf
+          app: windsurf
+          
+          ingredients:
+            dist: focal
+            sources:
+              - deb file://\${GITHUB_WORKSPACE}/windsurf-deb /
+            packages:
+              - windsurf
+          
+          script:
+            - mv usr/bin/* .  # Adjust based on actual binary location
+            - chmod +x windsurf  # Ensure the binary is executable
+          EOF
+
+      # Convert .deb to AppImage
+      - name: Convert windsurf to AppImage
+        run: |
+          pkg2appimage recipe.yml
+          # Move the generated AppImage to a predictable location
+          mv out/*.AppImage windsurf.AppImage
+
+      # Upload the AppImage as an artifact
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: windsurf-appimage
+          path: windsurf.AppImage
