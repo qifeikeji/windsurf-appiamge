@@ -23,13 +23,15 @@ jobs:
           curl -fsSL "https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/windsurf.gpg" | sudo gpg --dearmor -o /usr/share/keyrings/windsurf-stable-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/windsurf-stable-archive-keyring.gpg arch=amd64] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main" | sudo tee /etc/apt/sources.list.d/windsurf.list > /dev/null
 
-      # Update APT sources
+      # Update APT sources and debug
       - name: Update APT sources
         run: |
           sudo apt-get update
           # Verify that windsurf repository is included
           cat /etc/apt/sources.list.d/windsurf.list
-          apt-cache policy | grep windsurf
+          apt-cache policy | grep windsurf || echo "Windsurf repository not found in apt-cache policy!"
+          # Check if windsurf package is available
+          apt-cache search windsurf || echo "Windsurf package not found!"
 
       # Install dependencies
       - name: Install dependencies
@@ -39,13 +41,15 @@ jobs:
           # Verify dpkg-deb is available
           which dpkg-deb || { echo "dpkg-deb not found!"; exit 1; }
 
-      # Install windsurf
+      # Install windsurf and debug
       - name: Install windsurf
         run: |
-          sudo apt-get install -y windsurf
+          sudo apt-get install -y windsurf || { echo "Failed to install windsurf!"; exit 1; }
+          # Check APT cache for windsurf .deb
+          ls -l /var/cache/apt/archives/windsurf*.deb || echo "No windsurf .deb found in cache!"
 
-      # Locate the windsurf .deb package
-      - name: Locate windsurf .deb package
+      # Locate and inspect the windsurf .deb package
+      - name: Locate and inspect windsurf .deb package
         run: |
           # Find the cached .deb package in APT cache
           DEB_PATH=$(find /var/cache/apt/archives -name "windsurf*.deb" | head -n 1)
@@ -57,6 +61,9 @@ jobs:
           # Copy the .deb to workspace
           mkdir -p windsurf-deb
           cp "$DEB_PATH" windsurf-deb/windsurf.deb
+          # Inspect .deb contents
+          dpkg -c windsurf-deb/windsurf.deb > deb_contents.txt
+          cat deb_contents.txt
           echo "DEB_PATH=windsurf-deb/windsurf.deb" >> $GITHUB_ENV
 
       # Install pkg2appimage
@@ -81,20 +88,25 @@ jobs:
               - windsurf
           
           script:
-            - mv usr/bin/* .  # Adjust based on actual binary location
-            - chmod +x windsurf  # Ensure the binary is executable
+            - echo "Listing files in current directory:"
+            - ls -l
+            - echo "Checking for binary in common locations:"
+            - find usr/ opt/ -type f -executable -name "*windsurf*" || echo "No windsurf binary found!"
+            - mv usr/bin/windsurf . || mv opt/windsurf/windsurf . || mv usr/local/bin/windsurf . || echo "No windsurf binary found in expected locations!"
+            - chmod +x windsurf || echo "Failed to make windsurf executable!"
           EOF
 
       # Convert .deb to AppImage
       - name: Convert windsurf to AppImage
         run: |
-          pkg2appimage recipe.yml
+          pkg2appimage recipe.yml || echo "pkg2appimage failed, check logs for details."
           # Move the generated AppImage to a predictable location
-          mv out/*.AppImage windsurf.AppImage || echo "AppImage creation may have failed, check logs."
+          mv out/*.AppImage windsurf.AppImage || echo "No AppImage generated, check previous steps."
 
       # Upload the AppImage as an artifact
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: windsurf-appimage
+          name: windsur-appimage
           path: windsurf.AppImage
+          if-no-files-found: warn
